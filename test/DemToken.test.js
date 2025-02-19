@@ -1,229 +1,208 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("DemToken", function () {
-   let demToken;
-   let owner;
-   let addr1;
-   let addr2;
-   let vrfCoordinatorV2Mock;
-   let subscriptionId;
+describe("DemetraShoes", function () {
+    let demetraShoes;
+    let owner;
+    let addr1;
+    let addr2;
 
-   const GAS_LANE = "0x474e34a077df58807dbe9c96d3c009b23b3c6d0cce433e59bbf5b34f823bc56c";
-   const CALLBACK_GAS_LIMIT = "2500000";
-   const MINT_PRICE = ethers.parseEther("0.001");
-   const FUND_AMOUNT = ethers.parseEther("1000");
-   const MAX_SUPPLY = 10;
+    const MINT_PRICE = ethers.parseEther("0.001");
+    const MAX_SUPPLY = 100;
+    const MAX_MINT_PER_TX = 3;
 
-   async function mintNFT() {
-       const requestTx = await demToken.requestNFT({ value: MINT_PRICE });
-       const requestReceipt = await requestTx.wait();
-       const requestId = requestReceipt.logs[1].args[0];
-       
-       const randomWords = [BigInt("777")];
-       const fulfillTx = await vrfCoordinatorV2Mock.fulfillRandomWordsWithOverride(
-           requestId,
-           await demToken.getAddress(),
-           randomWords,
-           { gasLimit: CALLBACK_GAS_LIMIT }
-       );
-       await fulfillTx.wait();
-       await ethers.provider.send("evm_mine", []);
-   }
+    beforeEach(async function () {
+        [owner, addr1, addr2] = await ethers.getSigners();
 
-   beforeEach(async function () {
-       [owner, addr1, addr2] = await ethers.getSigners();
+        const DemetraShoes = await ethers.getContractFactory("DemetraShoes");
+        demetraShoes = await DemetraShoes.deploy();
+        await demetraShoes.waitForDeployment();
+    });
 
-       const VRFCoordinatorV2_5Mock = await ethers.getContractFactory("VRFCoordinatorV2_5Mock");
-       vrfCoordinatorV2Mock = await VRFCoordinatorV2_5Mock.deploy(
-           BigInt("100000000000000000"),
-           BigInt("1000000000"),
-           BigInt("4639000000000000")
-       );
-       await vrfCoordinatorV2Mock.waitForDeployment();
+    describe("Deployment", function () {
+        it("Should set the right owner", async function () {
+            expect(await demetraShoes.owner()).to.equal(owner.address);
+        });
 
-       const tx = await vrfCoordinatorV2Mock.createSubscription();
-       const txReceipt = await tx.wait();
-       subscriptionId = txReceipt.logs[0].args[0];
+        it("Should have correct name and symbol", async function () {
+            expect(await demetraShoes.name()).to.equal("Demetra Eco Shoes");
+            expect(await demetraShoes.symbol()).to.equal("DMTR");
+        });
+    });
 
-       await vrfCoordinatorV2Mock.fundSubscription(subscriptionId, FUND_AMOUNT);
+    describe("Minting", function () {
+        it("Should fail if not enough ETH is sent", async function () {
+            await expect(
+                demetraShoes.mintNFT(1, { value: ethers.parseEther("0.0001") })
+            ).to.be.revertedWithCustomError(demetraShoes, "InsufficientPayment");
+        });
 
-       const DemToken = await ethers.getContractFactory("DemToken");
-       demToken = await DemToken.deploy(
-           await vrfCoordinatorV2Mock.getAddress(),
-           GAS_LANE,
-           subscriptionId,
-           CALLBACK_GAS_LIMIT
-       );
-       await demToken.waitForDeployment();
+        it("Should mint NFT when correct amount is sent", async function () {
+            await demetraShoes.mintNFT(1, { value: MINT_PRICE });
+            expect(await demetraShoes.ownerOf(0)).to.equal(owner.address);
+        });
 
-       await vrfCoordinatorV2Mock.addConsumer(subscriptionId, await demToken.getAddress());
-   });
+        it("Should fail if trying to mint more than MAX_MINT_PER_TX", async function () {
+            const mintPrice = MINT_PRICE * BigInt(MAX_MINT_PER_TX + 1);
+            await expect(
+                demetraShoes.mintNFT(MAX_MINT_PER_TX + 1, { value: mintPrice })
+            ).to.be.revertedWithCustomError(demetraShoes, "InvalidMintAmount");
+        });
 
-   describe("Deployment", function () {
-       it("Should set the right owner", async function () {
-           expect(await demToken.owner()).to.equal(owner.address);
-       });
+        it("Should mint multiple NFTs in one transaction", async function () {
+            const mintPrice = MINT_PRICE * BigInt(3);
+            await demetraShoes.mintNFT(3, { value: mintPrice });
+            expect(await demetraShoes.ownerOf(0)).to.equal(owner.address);
+            expect(await demetraShoes.ownerOf(1)).to.equal(owner.address);
+            expect(await demetraShoes.ownerOf(2)).to.equal(owner.address);
+        });
+    });
 
-       it("Should have correct name and symbol", async function () {
-           expect(await demToken.name()).to.equal("DemToken");
-           expect(await demToken.symbol()).to.equal("DMTK");
-       });
-   });
+    describe("Shoe Attributes", function () {
+        beforeEach(async function () {
+            await demetraShoes.mintNFT(1, { value: MINT_PRICE });
+        });
 
-   describe("Minting", function () {
-       it("Should fail if not enough ETH is sent", async function () {
-           await expect(
-               demToken.requestNFT({ value: ethers.parseEther("0.0001") })
-           ).to.be.revertedWith("Not enough ETH sent");
-       });
+        it("Should generate valid sustainability score", async function () {
+            const attributes = await demetraShoes.getShoeAttributes(0);
+            expect(Number(attributes.sustainabilityScore)).to.be.above(69);
+            expect(Number(attributes.sustainabilityScore)).to.be.below(101);
+        });
 
-       it("Should request NFT when correct amount is sent", async function () {
-           const tx = await demToken.requestNFT({ value: MINT_PRICE });
-           const receipt = await tx.wait();
-           const requestId = receipt.logs[1].args[0];
-           expect(requestId).to.not.be.undefined;
-       });
+        it("Should generate valid rarity", async function () {
+            const attributes = await demetraShoes.getShoeAttributes(0);
+            expect(Number(attributes.rarity)).to.be.above(0);
+            expect(Number(attributes.rarity)).to.be.below(101);
+        });
 
-       it("Should mint NFT after random number is fulfilled", async function () {
-           await mintNFT();
-           expect(await demToken.ownerOf(0)).to.equal(owner.address);
-       });
-   });
+        it("Should generate valid discount level", async function () {
+            const attributes = await demetraShoes.getShoeAttributes(0);
+            expect(Number(attributes.discountLevel)).to.be.above(0);
+            expect(Number(attributes.discountLevel)).to.be.below(4);
+        });
 
-   describe("NFT Attributes", function () {
-       it("Should generate valid attributes from random number", async function () {
-           await mintNFT();
-           const attributes = await demToken.getTokenAttributes(0);
-           expect(attributes.strength).to.be.above(0);
-           expect(attributes.strength).to.be.below(101);
-           expect(attributes.speed).to.be.above(0);
-           expect(attributes.speed).to.be.below(101);
-           expect(attributes.magic).to.be.above(0);
-           expect(attributes.magic).to.be.below(101);
-       });
-   });
+        it("Should correctly calculate discount percentage", async function () {
+            const discount = await demetraShoes.getDiscountForToken(0);
+            expect(Number(discount)).to.be.above(0);
+            expect(Number(discount)).to.be.below(31);
+            expect(Number(discount) % 10).to.equal(0);
+        });
+    });
 
-   describe("Burning", function () {
-       beforeEach(async function () {
-           await mintNFT();
-       });
+    describe("HQ Tour Access", function () {
+        it("Should properly track HQ tour access", async function () {
+            const mintPrice = MINT_PRICE * BigInt(MAX_MINT_PER_TX);
+            await demetraShoes.mintNFT(MAX_MINT_PER_TX, { value: mintPrice });
+            
+            for(let i = 0; i < MAX_MINT_PER_TX; i++) {
+                const hasAccess = await demetraShoes.hasHQTourAccess(i);
+                const attributes = await demetraShoes.getShoeAttributes(i);
+                expect(hasAccess).to.equal(attributes.hqTourAccess);
+                if(hasAccess) {
+                    expect(Number(attributes.rarity)).to.be.above(95);
+                }
+            }
+        });
+    });
 
-       it("Should allow owner to burn their NFT", async function () {
-           await demToken.burnNFT(0);
-           await expect(demToken.ownerOf(0)).to.be.reverted;
-       });
+    describe("Burning", function () {
+        beforeEach(async function () {
+            await demetraShoes.mintNFT(1, { value: MINT_PRICE });
+        });
 
-       it("Should not allow non-owner to burn NFT", async function () {
-           await expect(
-               demToken.connect(addr1).burnNFT(0)
-           ).to.be.revertedWithCustomError(demToken, "NotTokenOwnerOrApproved");
-       });
-   });
+        it("Should allow owner to burn their NFT", async function () {
+            await demetraShoes.burnNFT(0);
+            await expect(demetraShoes.ownerOf(0)).to.be.reverted;
+        });
 
-   describe("Withdrawals", function () {
-       it("Should allow owner to withdraw", async function () {
-           await demToken.requestNFT({ value: MINT_PRICE });
-           const initialBalance = await ethers.provider.getBalance(owner.address);
-           await demToken.withdraw();
-           const finalBalance = await ethers.provider.getBalance(owner.address);
-           expect(finalBalance).to.be.above(initialBalance);
-       });
+        it("Should not allow non-owner to burn NFT", async function () {
+            await expect(
+                demetraShoes.connect(addr1).burnNFT(0)
+            ).to.be.revertedWithCustomError(demetraShoes, "NotTokenOwnerOrApproved");
+        });
 
-       it("Should not allow non-owner to withdraw", async function () {
-           await expect(
-               demToken.connect(addr1).withdraw()
-           ).to.be.reverted;
-       });
-   });
+        it("Should delete shoe attributes when burned", async function () {
+            await demetraShoes.burnNFT(0);
+            await expect(demetraShoes.getShoeAttributes(0))
+                .to.be.revertedWith("Token does not exist");
+        });
+    });
 
-   describe("Supply Management", function () {
-       it("Should not allow minting beyond MAX_SUPPLY", async function () {
-           await vrfCoordinatorV2Mock.fundSubscription(subscriptionId, ethers.parseEther("1000"));
+    describe("Withdrawals", function () {
+        it("Should allow owner to withdraw", async function () {
+            await demetraShoes.mintNFT(1, { value: MINT_PRICE });
+            const initialBalance = await ethers.provider.getBalance(owner.address);
+            await demetraShoes.withdraw();
+            const finalBalance = await ethers.provider.getBalance(owner.address);
+            expect(finalBalance).to.be.above(initialBalance);
+        });
 
-           for (let i = 0; i < MAX_SUPPLY; i++) {
-               const requestTx = await demToken.requestNFT({ value: MINT_PRICE });
-               const requestReceipt = await requestTx.wait();
-               const requestId = requestReceipt.logs[1].args[0];
-               
-               await vrfCoordinatorV2Mock.fulfillRandomWordsWithOverride(
-                   requestId,
-                   await demToken.getAddress(),
-                   [BigInt(i + 1)],
-                   { gasLimit: CALLBACK_GAS_LIMIT }
-               );
-               await ethers.provider.send("evm_mine", []);
+        it("Should not allow non-owner to withdraw", async function () {
+            await expect(
+                demetraShoes.connect(addr1).withdraw()
+            ).to.be.reverted;
+        });
+    });
 
-               expect(await demToken.ownerOf(i)).to.equal(owner.address);
-               console.log(`Minted token ${i}, Current count: ${await demToken.getCurrentTokenCount()}`);
-           }
+    describe("Supply Management", function () {
+        it("Should not allow minting beyond MAX_SUPPLY", async function () {
+            const batchSize = 3;
+            const iterations = Math.ceil(MAX_SUPPLY / batchSize);
+            const mintPrice = MINT_PRICE * BigInt(batchSize);
 
-           const tokenCount = await demToken.getCurrentTokenCount();
-           console.log("Final token count:", tokenCount);
-           expect(tokenCount).to.equal(MAX_SUPPLY);
+            for (let i = 0; i < iterations - 1; i++) {
+                await demetraShoes.mintNFT(batchSize, { value: mintPrice });
+            }
 
-           await expect(
-               demToken.requestNFT({ value: MINT_PRICE })
-           ).to.be.revertedWith("Max supply reached");
-       });
-   });
+            const remainingTokens = MAX_SUPPLY % batchSize;
+            if (remainingTokens > 0) {
+                const finalMintPrice = MINT_PRICE * BigInt(remainingTokens);
+                await demetraShoes.mintNFT(remainingTokens, { value: finalMintPrice });
+            }
 
-   describe("Token Transfers", function () {
-       beforeEach(async function () {
-           await mintNFT();
-       });
+            await expect(
+                demetraShoes.mintNFT(1, { value: MINT_PRICE })
+            ).to.be.revertedWithCustomError(demetraShoes, "MaxSupplyExceeded");
+        });
+    });
 
-       it("Should allow token transfer between addresses", async function () {
-           await demToken.transferFrom(owner.address, addr1.address, 0);
-           expect(await demToken.ownerOf(0)).to.equal(addr1.address);
-       });
+    describe("Token Transfers", function () {
+        beforeEach(async function () {
+            await demetraShoes.mintNFT(1, { value: MINT_PRICE });
+        });
 
-       it("Should maintain token attributes after transfer", async function () {
-           const attributesBefore = await demToken.getTokenAttributes(0);
-           await demToken.transferFrom(owner.address, addr1.address, 0);
-           const attributesAfter = await demToken.getTokenAttributes(0);
-           expect(attributesAfter.strength).to.equal(attributesBefore.strength);
-           expect(attributesAfter.speed).to.equal(attributesBefore.speed);
-           expect(attributesAfter.magic).to.equal(attributesBefore.magic);
-       });
+        it("Should maintain shoe attributes after transfer", async function () {
+            const attributesBefore = await demetraShoes.getShoeAttributes(0);
+            await demetraShoes.transferFrom(owner.address, addr1.address, 0);
+            const attributesAfter = await demetraShoes.getShoeAttributes(0);
+            
+            expect(Number(attributesAfter.sustainabilityScore))
+                .to.equal(Number(attributesBefore.sustainabilityScore));
+            expect(Number(attributesAfter.rarity))
+                .to.equal(Number(attributesBefore.rarity));
+            expect(Number(attributesAfter.discountLevel))
+                .to.equal(Number(attributesBefore.discountLevel));
+            expect(attributesAfter.hqTourAccess)
+                .to.equal(attributesBefore.hqTourAccess);
+        });
+    });
 
-       it("Should not allow transfer of non-existent token", async function () {
-           await expect(
-               demToken.transferFrom(owner.address, addr1.address, 999)
-           ).to.be.reverted;
-       });
-   });
+    describe("Minting State", function () {
+        it("Should allow toggling minting state", async function () {
+            await demetraShoes.setMintingEnabled(false);
+            await expect(
+                demetraShoes.mintNFT(1, { value: MINT_PRICE })
+            ).to.be.revertedWith("Minting is disabled");
 
-   describe("Events", function () {
-       it("Should emit NFTRequested event on request", async function () {
-           const tx = await demToken.requestNFT({ value: MINT_PRICE });
-           const receipt = await tx.wait();
-           const event = receipt.logs[1];
-           expect(event.args[1]).to.equal(owner.address);
-           expect(event.args[0]).to.not.be.undefined;
-       });
+            await demetraShoes.setMintingEnabled(true);
+            await demetraShoes.mintNFT(1, { value: MINT_PRICE });
+            expect(await demetraShoes.ownerOf(0)).to.equal(owner.address);
+        });
 
-       it("Should emit NFTMinted event after fulfillment", async function () {
-           await mintNFT();
-           expect(await demToken.ownerOf(0)).to.equal(owner.address);
-       });
-   });
-
-   describe("Edge Cases", function () {
-       it("Should handle zero ETH transfer on withdraw", async function () {
-           await demToken.withdraw();
-       });
-
-       it("Should maintain correct token counter after burns", async function () {
-           await mintNFT();
-           const initialCount = await demToken.getCurrentTokenCount();
-           
-           await demToken.burnNFT(0);
-           const countAfterBurn = await demToken.getCurrentTokenCount();
-           expect(countAfterBurn).to.equal(initialCount);
-
-           await mintNFT();
-           expect(await demToken.ownerOf(1)).to.equal(owner.address);
-       });
-   });
+        it("Should only allow owner to toggle minting state", async function () {
+            await expect(
+                demetraShoes.connect(addr1).setMintingEnabled(false)
+            ).to.be.reverted;
+        });
+    });
 });
