@@ -12,19 +12,18 @@ contract DemetraShoes is ERC721, Ownable {
     error InsufficientPayment();
 
     uint256 public constant MINT_PRICE = 0.001 ether;
-    uint256 public constant MAX_SUPPLY = 100;
+    uint256 public constant MAX_SUPPLY = 100;  
     uint256 public constant MAX_MINT_PER_TX = 3;
     
     uint256 private s_tokenCounter;
     bool public mintingEnabled = true;
     
-    
     struct ShoeAttributes {
-        uint256 randomNumber;     
-        uint256 sustainabilityScore; // (1-100)
-        uint256 rarity;           // model (1-100)
-        uint256 discountLevel;    // (10%-30%)
-        bool hqTourAccess;     
+        uint256 randomNumber;      
+        uint256 sustainabilityScore; 
+        uint256 rarity;           
+        uint256 discountLevel;    
+        bool hqTourAccess;        
     }
     
     mapping(uint256 => ShoeAttributes) public shoeAttributes;
@@ -63,7 +62,6 @@ contract DemetraShoes is ERC721, Ownable {
             _mint(msg.sender, tokenId + i);
             emit NFTMinted(tokenId + i, msg.sender, attributes);
             
-            // tour winner
             if(attributes.hqTourAccess) {
                 emit HQTourWinner(tokenId + i, msg.sender);
             }
@@ -73,11 +71,23 @@ contract DemetraShoes is ERC721, Ownable {
     }
 
     function generateShoeAttributes(uint256 randomNumber) private pure returns (ShoeAttributes memory) {
-        uint256 sustainabilityScore = (randomNumber % 30) + 70; // 70-100
-        uint256 rarity = (randomNumber % 100) + 1;  // 1-100
-        uint256 discountLevel = ((randomNumber >> 100) % 3) + 1; // 10-30%
+        // Prima determiniamo la rarità (1-100)
+        uint256 rarity = (randomNumber % 100) + 1;
         
-        // (rarity > 95)
+        // Sustainability Score basato sulla rarità
+        uint256 sustainabilityScore = 70 + ((rarity * 30) / 100);
+        
+        // Discount Level basato sulla rarità
+        uint256 discountLevel;
+        if (rarity <= 40) {
+            discountLevel = 1;
+        } else if (rarity <= 80) {
+            discountLevel = 2;
+        } else {
+            discountLevel = 3;
+        }
+        
+        // Tour HQ access per il top 5% di rarità
         bool hasHQAccess = rarity > 95;
 
         return ShoeAttributes({
@@ -89,6 +99,30 @@ contract DemetraShoes is ERC721, Ownable {
         });
     }
 
+    function getTokensByOwner(address owner) public view returns (uint256[] memory) {
+        uint256 tokenCount = balanceOf(owner);
+        uint256[] memory tokens = new uint256[](tokenCount);
+        uint256 counter = 0;
+        
+        for(uint256 i = 0; i < s_tokenCounter; i++) {
+            try this.ownerOf(i) returns (address currentOwner) {
+                if(currentOwner == owner) {
+                    tokens[counter] = i;
+                    counter++;
+                }
+            } catch {
+                continue; // Skip burned tokens
+            }
+        }
+        
+        return tokens;
+    }
+
+    function getShoeAttributes(uint256 tokenId) public view returns (ShoeAttributes memory) {
+        require(_tokenExists(tokenId), "Token does not exist");
+        return shoeAttributes[tokenId];
+    }
+
     function _tokenExists(uint256 tokenId) private view returns (bool) {
         try this.ownerOf(tokenId) returns (address) {
             return true;
@@ -97,14 +131,9 @@ contract DemetraShoes is ERC721, Ownable {
         }
     }
 
-    function getShoeAttributes(uint256 tokenId) public view returns (ShoeAttributes memory) {
-        require(_tokenExists(tokenId), "Token does not exist");
-        return shoeAttributes[tokenId];
-    }
-
     function getDiscountForToken(uint256 tokenId) public view returns (uint256) {
         require(_tokenExists(tokenId), "Token does not exist");
-        return shoeAttributes[tokenId].discountLevel * 10; 
+        return shoeAttributes[tokenId].discountLevel * 10;
     }
 
     function hasHQTourAccess(uint256 tokenId) public view returns (bool) {

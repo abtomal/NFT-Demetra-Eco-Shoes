@@ -52,56 +52,115 @@ describe("DemetraShoes", function () {
         it("Should mint multiple NFTs in one transaction", async function () {
             const mintPrice = MINT_PRICE * BigInt(3);
             await demetraShoes.mintNFT(3, { value: mintPrice });
-            expect(await demetraShoes.ownerOf(0)).to.equal(owner.address);
-            expect(await demetraShoes.ownerOf(1)).to.equal(owner.address);
-            expect(await demetraShoes.ownerOf(2)).to.equal(owner.address);
-        });
-    });
-
-    describe("Shoe Attributes", function () {
-        beforeEach(async function () {
-            await demetraShoes.mintNFT(1, { value: MINT_PRICE });
-        });
-
-        it("Should generate valid sustainability score", async function () {
-            const attributes = await demetraShoes.getShoeAttributes(0);
-            expect(Number(attributes.sustainabilityScore)).to.be.above(69);
-            expect(Number(attributes.sustainabilityScore)).to.be.below(101);
-        });
-
-        it("Should generate valid rarity", async function () {
-            const attributes = await demetraShoes.getShoeAttributes(0);
-            expect(Number(attributes.rarity)).to.be.above(0);
-            expect(Number(attributes.rarity)).to.be.below(101);
-        });
-
-        it("Should generate valid discount level", async function () {
-            const attributes = await demetraShoes.getShoeAttributes(0);
-            expect(Number(attributes.discountLevel)).to.be.above(0);
-            expect(Number(attributes.discountLevel)).to.be.below(4);
-        });
-
-        it("Should correctly calculate discount percentage", async function () {
-            const discount = await demetraShoes.getDiscountForToken(0);
-            expect(Number(discount)).to.be.above(0);
-            expect(Number(discount)).to.be.below(31);
-            expect(Number(discount) % 10).to.equal(0);
-        });
-    });
-
-    describe("HQ Tour Access", function () {
-        it("Should properly track HQ tour access", async function () {
-            const mintPrice = MINT_PRICE * BigInt(MAX_MINT_PER_TX);
-            await demetraShoes.mintNFT(MAX_MINT_PER_TX, { value: mintPrice });
             
-            for(let i = 0; i < MAX_MINT_PER_TX; i++) {
-                const hasAccess = await demetraShoes.hasHQTourAccess(i);
+            for(let i = 0; i < 3; i++) {
+                expect(await demetraShoes.ownerOf(i)).to.equal(owner.address);
+            }
+        });
+    });
+
+    describe("Shoe Attributes Correlation", function () {
+        beforeEach(async function () {
+            await demetraShoes.mintNFT(3, { value: MINT_PRICE * BigInt(3) });
+        });
+
+        it("Should generate valid rarity values", async function () {
+            for (let i = 0; i < 3; i++) {
                 const attributes = await demetraShoes.getShoeAttributes(i);
-                expect(hasAccess).to.equal(attributes.hqTourAccess);
-                if(hasAccess) {
-                    expect(Number(attributes.rarity)).to.be.above(95);
+                expect(Number(attributes.rarity)).to.be.above(0);
+                expect(Number(attributes.rarity)).to.be.below(101);
+            }
+        });
+
+        it("Should correlate sustainability score with rarity", async function () {
+            for (let i = 0; i < 3; i++) {
+                const attributes = await demetraShoes.getShoeAttributes(i);
+                const rarity = Number(attributes.rarity);
+                const sustainabilityScore = Number(attributes.sustainabilityScore);
+                
+                const expectedScore = Math.floor(70 + ((rarity * 30) / 100));
+                expect(sustainabilityScore).to.equal(expectedScore);
+                
+                expect(sustainabilityScore).to.be.above(69);
+                expect(sustainabilityScore).to.be.below(101);
+            }
+        });
+
+        it("Should correlate discount level with rarity ranges", async function () {
+            for (let i = 0; i < 3; i++) {
+                const attributes = await demetraShoes.getShoeAttributes(i);
+                const rarity = Number(attributes.rarity);
+                const discountLevel = Number(attributes.discountLevel);
+
+                if (rarity <= 40) {
+                    expect(discountLevel).to.equal(1);
+                } else if (rarity <= 80) {
+                    expect(discountLevel).to.equal(2);
+                } else {
+                    expect(discountLevel).to.equal(3);
                 }
             }
+        });
+
+        it("Should only give HQ access to very rare NFTs", async function () {
+            for (let i = 0; i < 3; i++) {
+                const attributes = await demetraShoes.getShoeAttributes(i);
+                const rarity = Number(attributes.rarity);
+                const hasAccess = attributes.hqTourAccess;
+
+                if (rarity > 95) {
+                    expect(hasAccess).to.be.true;
+                } else {
+                    expect(hasAccess).to.be.false;
+                }
+            }
+        });
+
+        it("Should calculate correct discount percentages", async function () {
+            for (let i = 0; i < 3; i++) {
+                const attributes = await demetraShoes.getShoeAttributes(i);
+                const discountLevel = Number(attributes.discountLevel);
+                const discount = Number(await demetraShoes.getDiscountForToken(i));
+                
+                expect(discount).to.equal(discountLevel * 10);
+                expect(discount).to.be.oneOf([10, 20, 30]);
+            }
+        });
+    });
+
+    describe("Token Ownership", function () {
+        beforeEach(async function () {
+            await demetraShoes.mintNFT(3, { value: MINT_PRICE * BigInt(3) });
+        });
+
+        it("Should return correct tokens for owner", async function () {
+            const tokens = await demetraShoes.getTokensByOwner(owner.address);
+            expect(tokens.length).to.equal(3);
+            expect(Number(tokens[0])).to.equal(0);
+            expect(Number(tokens[1])).to.equal(1);
+            expect(Number(tokens[2])).to.equal(2);
+        });
+
+        it("Should handle transferred tokens correctly", async function () {
+            await demetraShoes.transferFrom(owner.address, addr1.address, 1);
+            
+            const ownerTokens = await demetraShoes.getTokensByOwner(owner.address);
+            expect(ownerTokens.length).to.equal(2);
+            expect(Number(ownerTokens[0])).to.equal(0);
+            expect(Number(ownerTokens[1])).to.equal(2);
+            
+            const addr1Tokens = await demetraShoes.getTokensByOwner(addr1.address);
+            expect(addr1Tokens.length).to.equal(1);
+            expect(Number(addr1Tokens[0])).to.equal(1);
+        });
+
+        it("Should handle burned tokens correctly", async function () {
+            await demetraShoes.burnNFT(1);
+            
+            const tokens = await demetraShoes.getTokensByOwner(owner.address);
+            expect(tokens.length).to.equal(2);
+            expect(Number(tokens[0])).to.equal(0);
+            expect(Number(tokens[1])).to.equal(2);
         });
     });
 
