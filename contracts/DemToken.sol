@@ -71,7 +71,7 @@ contract DemetraShoes is ERC721, Ownable {
     }
 
     function generateShoeAttributes(uint256 randomNumber) private pure returns (ShoeAttributes memory) {
-        // Prima determiniamo la rarità (1-100)
+        // Determinazione rarità (1-100)
         uint256 rarity = (randomNumber % 100) + 1;
         
         // Sustainability Score basato sulla rarità
@@ -87,7 +87,7 @@ contract DemetraShoes is ERC721, Ownable {
             discountLevel = 3;
         }
         
-        // Tour HQ access per il top 5% di rarità
+        // Tour HQ access per il top 5% rarity
         bool hasHQAccess = rarity > 95;
 
         return ShoeAttributes({
@@ -111,7 +111,7 @@ contract DemetraShoes is ERC721, Ownable {
                     counter++;
                 }
             } catch {
-                continue; // Skip burned tokens
+                continue; 
             }
         }
         
