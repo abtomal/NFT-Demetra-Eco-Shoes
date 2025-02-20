@@ -22,8 +22,8 @@ Smart contract for Demetra's eco-friendly shoes NFT collection. Each NFT represe
 
 1. Clone the repository:
 ```bash
-git clone [https://github.com/abtomal/NFT-Demetra-Eco-Shoes.git]
-cd [NFT-Demetra-Eco-Shoes]
+git clone https://github.com/abtomal/NFT-Demetra-Eco-Shoes.git
+cd NFT-Demetra-Eco-Shoes
 ```
 
 2. Install dependencies:
