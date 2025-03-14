@@ -40,6 +40,11 @@ describe("DemetraShoes", function () {
         it("Should mint NFT when correct amount is sent", async function () {
             await demetraShoes.mintNFT(1, { value: MINT_PRICE });
             expect(await demetraShoes.ownerOf(0)).to.equal(owner.address);
+            
+            // Verifica che il token sia nel mapping personalizzato
+            const ownerTokens = await demetraShoes.getTokensByOwner(owner.address);
+            expect(ownerTokens.length).to.equal(1);
+            expect(Number(ownerTokens[0])).to.equal(0);
         });
 
         it("Should fail if trying to mint more than MAX_MINT_PER_TX", async function () {
@@ -56,6 +61,38 @@ describe("DemetraShoes", function () {
             for(let i = 0; i < 3; i++) {
                 expect(await demetraShoes.ownerOf(i)).to.equal(owner.address);
             }
+            
+            // Verifica che tutti i token siano nel mapping personalizzato
+            const ownerTokens = await demetraShoes.getTokensByOwner(owner.address);
+            expect(ownerTokens.length).to.equal(3);
+            
+            // Verifica che l'array contenga tutti i token corretti
+            const tokenIds = ownerTokens.map(t => Number(t)).sort((a, b) => a - b);
+            expect(tokenIds).to.deep.equal([0, 1, 2]);
+        });
+
+        it("Should handle concurrent minting properly", async function () {
+            // mint contemporanei
+            await Promise.all([
+                demetraShoes.mintNFT(2, { value: MINT_PRICE * BigInt(2) }),
+                demetraShoes.connect(addr1).mintNFT(2, { value: MINT_PRICE * BigInt(2) })
+            ]);
+            
+            const totalTokens = await demetraShoes.getCurrentTokenCount();
+            expect(totalTokens).to.equal(4);
+            
+            // ogni token abbia un proprietario
+            for(let i = 0; i < 4; i++) {
+                const owner = await demetraShoes.ownerOf(i);
+                expect(owner).to.not.equal(ethers.ZeroAddress);
+            }
+            
+            // Verifica mappings personalizzati
+            const ownerTokens = await demetraShoes.getTokensByOwner(owner.address);
+            const addr1Tokens = await demetraShoes.getTokensByOwner(addr1.address);
+            
+            // Verifica che i token siano assegnati correttamente
+            expect(ownerTokens.length + addr1Tokens.length).to.equal(4);
         });
     });
 
@@ -136,9 +173,10 @@ describe("DemetraShoes", function () {
         it("Should return correct tokens for owner", async function () {
             const tokens = await demetraShoes.getTokensByOwner(owner.address);
             expect(tokens.length).to.equal(3);
-            expect(Number(tokens[0])).to.equal(0);
-            expect(Number(tokens[1])).to.equal(1);
-            expect(Number(tokens[2])).to.equal(2);
+            
+            // Verifica che gli array contengano i token corretti
+            const tokenIds = tokens.map(t => Number(t)).sort((a, b) => a - b);
+            expect(tokenIds).to.deep.equal([0, 1, 2]);
         });
 
         it("Should handle transferred tokens correctly", async function () {
@@ -146,8 +184,11 @@ describe("DemetraShoes", function () {
             
             const ownerTokens = await demetraShoes.getTokensByOwner(owner.address);
             expect(ownerTokens.length).to.equal(2);
-            expect(Number(ownerTokens[0])).to.equal(0);
-            expect(Number(ownerTokens[1])).to.equal(2);
+            
+            // Verifica che il token 1 non sia più nell'elenco dell'owner
+            const ownerTokenIds = ownerTokens.map(t => Number(t)).sort((a, b) => a - b);
+            expect(ownerTokenIds).to.not.include(1);
+            expect(ownerTokenIds).to.deep.equal([0, 2]);
             
             const addr1Tokens = await demetraShoes.getTokensByOwner(addr1.address);
             expect(addr1Tokens.length).to.equal(1);
@@ -159,8 +200,41 @@ describe("DemetraShoes", function () {
             
             const tokens = await demetraShoes.getTokensByOwner(owner.address);
             expect(tokens.length).to.equal(2);
-            expect(Number(tokens[0])).to.equal(0);
-            expect(Number(tokens[1])).to.equal(2);
+            
+            // Verifica che il token 1 non sia più nell'elenco
+            const tokenIds = tokens.map(t => Number(t)).sort((a, b) => a - b);
+            expect(tokenIds).to.not.include(1);
+            expect(tokenIds).to.deep.equal([0, 2]);
+        });
+
+        it("Should handle multiple transfers efficiently", async function() {
+            // Brucia tutti i token esistenti
+            for (let i = 0; i < 3; i++) {
+                await demetraShoes.burnNFT(i);
+            }
+            
+            // Minta nuovi token
+            await demetraShoes.mintNFT(3, { value: MINT_PRICE * BigInt(3) });
+            await demetraShoes.mintNFT(2, { value: MINT_PRICE * BigInt(2) });
+            
+            // Trasferisci alcuni token
+            await demetraShoes.transferFrom(owner.address, addr1.address, 3);
+            await demetraShoes.transferFrom(owner.address, addr1.address, 5);
+            await demetraShoes.connect(addr1).transferFrom(addr1.address, owner.address, 3);
+            
+            // Verifica ownership
+            const ownerTokens = await demetraShoes.getTokensByOwner(owner.address);
+            const addr1Tokens = await demetraShoes.getTokensByOwner(addr1.address);
+            
+            expect(ownerTokens.length).to.equal(4);
+            expect(addr1Tokens.length).to.equal(1);
+            
+            const ownerTokenIds = ownerTokens.map(t => Number(t)).sort((a, b) => a - b);
+            expect(ownerTokenIds).to.include(3);
+            expect(ownerTokenIds).to.not.include(5);
+            
+            const addr1TokenIds = addr1Tokens.map(t => Number(t));
+            expect(addr1TokenIds[0]).to.equal(5);
         });
     });
 
@@ -172,6 +246,10 @@ describe("DemetraShoes", function () {
         it("Should allow owner to burn their NFT", async function () {
             await demetraShoes.burnNFT(0);
             await expect(demetraShoes.ownerOf(0)).to.be.reverted;
+            
+            // Verifica che il token sia stato rimosso dal mapping personalizzato
+            const ownerTokens = await demetraShoes.getTokensByOwner(owner.address);
+            expect(ownerTokens.length).to.equal(0);
         });
 
         it("Should not allow non-owner to burn NFT", async function () {
@@ -243,6 +321,19 @@ describe("DemetraShoes", function () {
                 .to.equal(Number(attributesBefore.discountLevel));
             expect(attributesAfter.hqTourAccess)
                 .to.equal(attributesBefore.hqTourAccess);
+        });
+        
+        it("Should update ownership mappings after transfer", async function() {
+            await demetraShoes.transferFrom(owner.address, addr1.address, 0);
+            
+            // Verifica che il token sia stato rimosso dall'elenco dell'owner
+            const ownerTokens = await demetraShoes.getTokensByOwner(owner.address);
+            expect(ownerTokens.length).to.equal(0);
+            
+            // Verifica che il token sia stato aggiunto all'elenco del ricevente
+            const addr1Tokens = await demetraShoes.getTokensByOwner(addr1.address);
+            expect(addr1Tokens.length).to.equal(1);
+            expect(Number(addr1Tokens[0])).to.equal(0);
         });
     });
 

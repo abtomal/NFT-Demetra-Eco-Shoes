@@ -27,6 +27,8 @@ contract DemetraShoes is ERC721, Ownable {
     }
     
     mapping(uint256 => ShoeAttributes) public shoeAttributes;
+    mapping(uint256 => bool) private tokenExists;
+    mapping(address => mapping(uint256 => bool)) private ownerTokens;
     
     event NFTMinted(uint256 indexed tokenId, address minter, ShoeAttributes attributes);
     event MintingStateChanged(bool enabled);
@@ -46,38 +48,39 @@ contract DemetraShoes is ERC721, Ownable {
         if(s_tokenCounter + numberOfTokens > MAX_SUPPLY) revert MaxSupplyExceeded();
         if(msg.value < MINT_PRICE * numberOfTokens) revert InsufficientPayment();
 
-        uint256 tokenId = s_tokenCounter;
+        uint256 startTokenId = s_tokenCounter;
+        s_tokenCounter += numberOfTokens;
+
         for(uint256 i = 0; i < numberOfTokens; i++) {
+            uint256 tokenId = startTokenId + i;
             uint256 randomNumber = uint256(keccak256(abi.encodePacked(
                 block.timestamp,
                 block.prevrandao,
                 msg.sender,
-                tokenId + i,
+                tokenId,
                 blockhash(block.number - 1)
             )));
             
             ShoeAttributes memory attributes = generateShoeAttributes(randomNumber);
-            shoeAttributes[tokenId + i] = attributes;
+            shoeAttributes[tokenId] = attributes;
             
-            _mint(msg.sender, tokenId + i);
-            emit NFTMinted(tokenId + i, msg.sender, attributes);
+            _mint(msg.sender, tokenId);
+            tokenExists[tokenId] = true;
+            ownerTokens[msg.sender][tokenId] = true;
+            
+            emit NFTMinted(tokenId, msg.sender, attributes);
             
             if(attributes.hqTourAccess) {
-                emit HQTourWinner(tokenId + i, msg.sender);
+                emit HQTourWinner(tokenId, msg.sender);
             }
         }
-        
-        s_tokenCounter += numberOfTokens;
     }
 
     function generateShoeAttributes(uint256 randomNumber) private pure returns (ShoeAttributes memory) {
-        // Determinazione rarità (1-100)
         uint256 rarity = (randomNumber % 100) + 1;
         
-        // Sustainability Score basato sulla rarità
         uint256 sustainabilityScore = 70 + ((rarity * 30) / 100);
         
-        // Discount Level basato sulla rarità
         uint256 discountLevel;
         if (rarity <= 40) {
             discountLevel = 1;
@@ -87,7 +90,6 @@ contract DemetraShoes is ERC721, Ownable {
             discountLevel = 3;
         }
         
-        // Tour HQ access per il top 5% rarity
         bool hasHQAccess = rarity > 95;
 
         return ShoeAttributes({
@@ -100,44 +102,37 @@ contract DemetraShoes is ERC721, Ownable {
     }
 
     function getTokensByOwner(address owner) public view returns (uint256[] memory) {
-        uint256 tokenCount = balanceOf(owner);
-        uint256[] memory tokens = new uint256[](tokenCount);
-        uint256 counter = 0;
+        uint256 balance = balanceOf(owner);
+        uint256[] memory result = new uint256[](balance);
         
-        for(uint256 i = 0; i < s_tokenCounter; i++) {
-            try this.ownerOf(i) returns (address currentOwner) {
-                if(currentOwner == owner) {
-                    tokens[counter] = i;
-                    counter++;
-                }
-            } catch {
-                continue; 
+        if (balance == 0) {
+            return result;
+        }
+        
+        uint256 resultIndex = 0;
+        
+        for (uint256 i = 0; i < s_tokenCounter && resultIndex < balance; i++) {
+            if (tokenExists[i] && _ownerOf(i) == owner) {
+                result[resultIndex] = i;
+                resultIndex++;
             }
         }
         
-        return tokens;
+        return result;
     }
 
     function getShoeAttributes(uint256 tokenId) public view returns (ShoeAttributes memory) {
-        require(_tokenExists(tokenId), "Token does not exist");
+        require(tokenExists[tokenId], "Token does not exist");
         return shoeAttributes[tokenId];
     }
 
-    function _tokenExists(uint256 tokenId) private view returns (bool) {
-        try this.ownerOf(tokenId) returns (address) {
-            return true;
-        } catch {
-            return false;
-        }
-    }
-
     function getDiscountForToken(uint256 tokenId) public view returns (uint256) {
-        require(_tokenExists(tokenId), "Token does not exist");
+        require(tokenExists[tokenId], "Token does not exist");
         return shoeAttributes[tokenId].discountLevel * 10;
     }
 
     function hasHQTourAccess(uint256 tokenId) public view returns (bool) {
-        require(_tokenExists(tokenId), "Token does not exist");
+        require(tokenExists[tokenId], "Token does not exist");
         return shoeAttributes[tokenId].hqTourAccess;
     }
 
@@ -152,10 +147,35 @@ contract DemetraShoes is ERC721, Ownable {
         require(success, "Transfer failed");
     }
 
+    function _update(address to, uint256 tokenId, address auth) 
+        internal 
+        override 
+        returns (address from) 
+    {
+        from = super._update(to, tokenId, auth);
+        
+        if (from != address(0)) {
+            ownerTokens[from][tokenId] = false;
+        }
+        
+        if (to != address(0)) {
+            ownerTokens[to][tokenId] = true;
+        } else {
+            tokenExists[tokenId] = false;
+        }
+        
+        return from;
+    }
+
     function burnNFT(uint256 tokenId) public {
-        if(ownerOf(tokenId) != msg.sender && getApproved(tokenId) != msg.sender) 
+        address owner = _ownerOf(tokenId);
+        if(owner != msg.sender && getApproved(tokenId) != msg.sender) 
             revert NotTokenOwnerOrApproved();
+        
         delete shoeAttributes[tokenId];
+        tokenExists[tokenId] = false;
+        ownerTokens[owner][tokenId] = false;
+        
         _burn(tokenId);
     }
 
